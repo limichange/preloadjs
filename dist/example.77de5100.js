@@ -117,277 +117,344 @@ parcelRequire = (function (modules, cache, entry, globalName) {
   }
 
   return newRequire;
-})({"../src/events/EventEmitter.ts":[function(require,module,exports) {
-"use strict";
+})({"../node_modules/eventemitter3/index.js":[function(require,module,exports) {
+'use strict';
 
-var __classPrivateFieldGet = this && this.__classPrivateFieldGet || function (receiver, state, kind, f) {
-  if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a getter");
-  if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
-  return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
-};
+var has = Object.prototype.hasOwnProperty
+  , prefix = '~';
 
-var __classPrivateFieldSet = this && this.__classPrivateFieldSet || function (receiver, state, value, kind, f) {
-  if (kind === "m") throw new TypeError("Private method is not writable");
-  if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a setter");
-  if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot write private member to an object whose class did not declare it");
-  return kind === "a" ? f.call(receiver, value) : f ? f.value = value : state.set(receiver, value), value;
-};
+/**
+ * Constructor to create a storage for our `EE` objects.
+ * An `Events` instance is a plain object whose properties are event names.
+ *
+ * @constructor
+ * @private
+ */
+function Events() {}
 
-var _EventEmitter_events, _EventEmitter_eventsCount;
+//
+// We try to not inherit from `Object.prototype`. In some engines creating an
+// instance in this way is faster than calling `Object.create(null)` directly.
+// If `Object.create(null)` is not supported we prefix the event names with a
+// character to make sure that the built-in object properties are not
+// overridden or used as an attack vector.
+//
+if (Object.create) {
+  Events.prototype = Object.create(null);
 
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-var has = Object.prototype.hasOwnProperty;
-var prefix = '~';
+  //
+  // This hack is needed because the `__proto__` property is still inherited in
+  // some old browsers like Android 4, iPhone 5.1, Opera 11 and Safari 5.
+  //
+  if (!new Events().__proto__) prefix = false;
+}
 
-var Events =
-/** @class */
-function () {
-  function Events() {}
+/**
+ * Representation of a single event listener.
+ *
+ * @param {Function} fn The listener function.
+ * @param {*} context The context to invoke the listener with.
+ * @param {Boolean} [once=false] Specify if the listener is a one-time listener.
+ * @constructor
+ * @private
+ */
+function EE(fn, context, once) {
+  this.fn = fn;
+  this.context = context;
+  this.once = once || false;
+}
 
-  return Events;
-}();
-
-var EE =
-/** @class */
-function () {
-  function EE(fn, context, once) {
-    this.fn = fn;
-    this.context = context;
-    this.once = once || false;
+/**
+ * Add a listener for a given event.
+ *
+ * @param {EventEmitter} emitter Reference to the `EventEmitter` instance.
+ * @param {(String|Symbol)} event The event name.
+ * @param {Function} fn The listener function.
+ * @param {*} context The context to invoke the listener with.
+ * @param {Boolean} once Specify if the listener is a one-time listener.
+ * @returns {EventEmitter}
+ * @private
+ */
+function addListener(emitter, event, fn, context, once) {
+  if (typeof fn !== 'function') {
+    throw new TypeError('The listener must be a function');
   }
 
-  return EE;
-}();
+  var listener = new EE(fn, context || emitter, once)
+    , evt = prefix ? prefix + event : event;
 
-var EventEmitter =
-/** @class */
-function () {
-  function EventEmitter() {
-    _EventEmitter_events.set(this, new Events());
+  if (!emitter._events[evt]) emitter._events[evt] = listener, emitter._eventsCount++;
+  else if (!emitter._events[evt].fn) emitter._events[evt].push(listener);
+  else emitter._events[evt] = [emitter._events[evt], listener];
 
-    _EventEmitter_eventsCount.set(this, 0);
+  return emitter;
+}
+
+/**
+ * Clear event by name.
+ *
+ * @param {EventEmitter} emitter Reference to the `EventEmitter` instance.
+ * @param {(String|Symbol)} evt The Event name.
+ * @private
+ */
+function clearEvent(emitter, evt) {
+  if (--emitter._eventsCount === 0) emitter._events = new Events();
+  else delete emitter._events[evt];
+}
+
+/**
+ * Minimal `EventEmitter` interface that is molded against the Node.js
+ * `EventEmitter` interface.
+ *
+ * @constructor
+ * @public
+ */
+function EventEmitter() {
+  this._events = new Events();
+  this._eventsCount = 0;
+}
+
+/**
+ * Return an array listing the events for which the emitter has registered
+ * listeners.
+ *
+ * @returns {Array}
+ * @public
+ */
+EventEmitter.prototype.eventNames = function eventNames() {
+  var names = []
+    , events
+    , name;
+
+  if (this._eventsCount === 0) return names;
+
+  for (name in (events = this._events)) {
+    if (has.call(events, name)) names.push(prefix ? name.slice(1) : name);
   }
 
-  EventEmitter.prototype.addListener = function (event, fn, once) {
-    if (typeof fn !== 'function') {
-      throw new TypeError('The listener must be a function');
+  if (Object.getOwnPropertySymbols) {
+    return names.concat(Object.getOwnPropertySymbols(events));
+  }
+
+  return names;
+};
+
+/**
+ * Return the listeners registered for a given event.
+ *
+ * @param {(String|Symbol)} event The event name.
+ * @returns {Array} The registered listeners.
+ * @public
+ */
+EventEmitter.prototype.listeners = function listeners(event) {
+  var evt = prefix ? prefix + event : event
+    , handlers = this._events[evt];
+
+  if (!handlers) return [];
+  if (handlers.fn) return [handlers.fn];
+
+  for (var i = 0, l = handlers.length, ee = new Array(l); i < l; i++) {
+    ee[i] = handlers[i].fn;
+  }
+
+  return ee;
+};
+
+/**
+ * Return the number of listeners listening to a given event.
+ *
+ * @param {(String|Symbol)} event The event name.
+ * @returns {Number} The number of listeners.
+ * @public
+ */
+EventEmitter.prototype.listenerCount = function listenerCount(event) {
+  var evt = prefix ? prefix + event : event
+    , listeners = this._events[evt];
+
+  if (!listeners) return 0;
+  if (listeners.fn) return 1;
+  return listeners.length;
+};
+
+/**
+ * Calls each of the listeners registered for a given event.
+ *
+ * @param {(String|Symbol)} event The event name.
+ * @returns {Boolean} `true` if the event had listeners, else `false`.
+ * @public
+ */
+EventEmitter.prototype.emit = function emit(event, a1, a2, a3, a4, a5) {
+  var evt = prefix ? prefix + event : event;
+
+  if (!this._events[evt]) return false;
+
+  var listeners = this._events[evt]
+    , len = arguments.length
+    , args
+    , i;
+
+  if (listeners.fn) {
+    if (listeners.once) this.removeListener(event, listeners.fn, undefined, true);
+
+    switch (len) {
+      case 1: return listeners.fn.call(listeners.context), true;
+      case 2: return listeners.fn.call(listeners.context, a1), true;
+      case 3: return listeners.fn.call(listeners.context, a1, a2), true;
+      case 4: return listeners.fn.call(listeners.context, a1, a2, a3), true;
+      case 5: return listeners.fn.call(listeners.context, a1, a2, a3, a4), true;
+      case 6: return listeners.fn.call(listeners.context, a1, a2, a3, a4, a5), true;
     }
 
-    var listener = new EE(fn, this, once);
-    var evt = prefix ? prefix + event : event;
-
-    if (!__classPrivateFieldGet(this, _EventEmitter_events, "f")[evt]) {
-      __classPrivateFieldGet(this, _EventEmitter_events, "f")[evt] = listener;
-
-      __classPrivateFieldSet(this, _EventEmitter_eventsCount, +__classPrivateFieldGet(this, _EventEmitter_eventsCount, "f") + 1, "f");
-    } else if (!__classPrivateFieldGet(this, _EventEmitter_events, "f")[evt].fn) {
-      __classPrivateFieldGet(this, _EventEmitter_events, "f")[evt].push(listener);
-    } else {
-      __classPrivateFieldGet(this, _EventEmitter_events, "f")[evt] = [__classPrivateFieldGet(this, _EventEmitter_events, "f")[evt], listener];
+    for (i = 1, args = new Array(len -1); i < len; i++) {
+      args[i - 1] = arguments[i];
     }
 
-    return this;
-  };
+    listeners.fn.apply(listeners.context, args);
+  } else {
+    var length = listeners.length
+      , j;
 
-  EventEmitter.prototype.clearEvent = function (evt) {
-    if (__classPrivateFieldSet(this, _EventEmitter_eventsCount, +__classPrivateFieldGet(this, _EventEmitter_eventsCount, "f") - 1, "f") === 0) {
-      __classPrivateFieldSet(this, _EventEmitter_events, new Events(), "f");
-    } else {
-      delete __classPrivateFieldGet(this, _EventEmitter_events, "f")[evt];
-    }
-  };
-
-  EventEmitter.prototype.eventNames = function () {
-    var names = [];
-    var events;
-    var name;
-    if (__classPrivateFieldGet(this, _EventEmitter_eventsCount, "f") === 0) return names;
-
-    for (name in events = __classPrivateFieldGet(this, _EventEmitter_events, "f")) {
-      if (has.call(events, name)) {
-        names.push(prefix ? name.slice(1) : name);
-      }
-    }
-
-    if (Object.getOwnPropertySymbols) {
-      return names.concat(Object.getOwnPropertySymbols(events));
-    }
-
-    return names;
-  };
-
-  EventEmitter.prototype.listeners = function (event) {
-    var evt = prefix ? prefix + event : event,
-        handlers = __classPrivateFieldGet(this, _EventEmitter_events, "f")[evt];
-
-    if (!handlers) return [];
-    if (handlers.fn) return [handlers.fn];
-
-    for (var i = 0, l = handlers.length, ee = new Array(l); i < l; i++) {
-      ee[i] = handlers[i].fn;
-    }
-
-    return ee;
-  };
-
-  EventEmitter.prototype.listenerCount = function (event) {
-    var evt = prefix ? prefix + event : event,
-        listeners = __classPrivateFieldGet(this, _EventEmitter_events, "f")[evt];
-
-    if (!listeners) return 0;
-    if (listeners.fn) return 1;
-    return listeners.length;
-  };
-
-  EventEmitter.prototype.emit = function (event) {
-    var data = [];
-
-    for (var _i = 1; _i < arguments.length; _i++) {
-      data[_i - 1] = arguments[_i];
-    }
-
-    var evt = prefix ? prefix + event : event;
-    var a1 = data[0],
-        a2 = data[1],
-        a3 = data[2],
-        a4 = data[3],
-        a5 = data[4];
-    if (!__classPrivateFieldGet(this, _EventEmitter_events, "f")[evt]) return false;
-
-    var listeners = __classPrivateFieldGet(this, _EventEmitter_events, "f")[evt],
-        len = arguments.length,
-        args,
-        i;
-
-    if (listeners.fn) {
-      if (listeners.once) this.removeListener(event, listeners.fn, undefined, true);
+    for (i = 0; i < length; i++) {
+      if (listeners[i].once) this.removeListener(event, listeners[i].fn, undefined, true);
 
       switch (len) {
-        case 1:
-          return listeners.fn.call(listeners.context), true;
+        case 1: listeners[i].fn.call(listeners[i].context); break;
+        case 2: listeners[i].fn.call(listeners[i].context, a1); break;
+        case 3: listeners[i].fn.call(listeners[i].context, a1, a2); break;
+        case 4: listeners[i].fn.call(listeners[i].context, a1, a2, a3); break;
+        default:
+          if (!args) for (j = 1, args = new Array(len -1); j < len; j++) {
+            args[j - 1] = arguments[j];
+          }
 
-        case 2:
-          return listeners.fn.call(listeners.context, a1), true;
-
-        case 3:
-          return listeners.fn.call(listeners.context, a1, a2), true;
-
-        case 4:
-          return listeners.fn.call(listeners.context, a1, a2, a3), true;
-
-        case 5:
-          return listeners.fn.call(listeners.context, a1, a2, a3, a4), true;
-
-        case 6:
-          return listeners.fn.call(listeners.context, a1, a2, a3, a4, a5), true;
-      }
-
-      for (i = 1, args = new Array(len - 1); i < len; i++) {
-        args[i - 1] = arguments[i];
-      }
-
-      listeners.fn.apply(listeners.context, args);
-    } else {
-      var length = listeners.length,
-          j;
-
-      for (i = 0; i < length; i++) {
-        if (listeners[i].once) this.removeListener(event, listeners[i].fn, undefined, true);
-
-        switch (len) {
-          case 1:
-            listeners[i].fn.call(listeners[i].context);
-            break;
-
-          case 2:
-            listeners[i].fn.call(listeners[i].context, a1);
-            break;
-
-          case 3:
-            listeners[i].fn.call(listeners[i].context, a1, a2);
-            break;
-
-          case 4:
-            listeners[i].fn.call(listeners[i].context, a1, a2, a3);
-            break;
-
-          default:
-            if (!args) for (j = 1, args = new Array(len - 1); j < len; j++) {
-              args[j - 1] = arguments[j];
-            }
-            listeners[i].fn.apply(listeners[i].context, args);
-        }
+          listeners[i].fn.apply(listeners[i].context, args);
       }
     }
+  }
 
-    return true;
-  };
+  return true;
+};
 
-  EventEmitter.prototype.on = function (event, fn) {
-    return this.addListener(event, fn, false);
-  };
+/**
+ * Add a listener for a given event.
+ *
+ * @param {(String|Symbol)} event The event name.
+ * @param {Function} fn The listener function.
+ * @param {*} [context=this] The context to invoke the listener with.
+ * @returns {EventEmitter} `this`.
+ * @public
+ */
+EventEmitter.prototype.on = function on(event, fn, context) {
+  return addListener(this, event, fn, context, false);
+};
 
-  EventEmitter.prototype.once = function (event, fn) {
-    return this.addListener(event, fn, true);
-  };
+/**
+ * Add a one-time listener for a given event.
+ *
+ * @param {(String|Symbol)} event The event name.
+ * @param {Function} fn The listener function.
+ * @param {*} [context=this] The context to invoke the listener with.
+ * @returns {EventEmitter} `this`.
+ * @public
+ */
+EventEmitter.prototype.once = function once(event, fn, context) {
+  return addListener(this, event, fn, context, true);
+};
 
-  EventEmitter.prototype.removeListener = function (event, fn, context, once) {
-    var evt = prefix ? prefix + event : event;
-    if (!__classPrivateFieldGet(this, _EventEmitter_events, "f")[evt]) return this;
+/**
+ * Remove the listeners of a given event.
+ *
+ * @param {(String|Symbol)} event The event name.
+ * @param {Function} fn Only remove the listeners that match this function.
+ * @param {*} context Only remove the listeners that have this context.
+ * @param {Boolean} once Only remove one-time listeners.
+ * @returns {EventEmitter} `this`.
+ * @public
+ */
+EventEmitter.prototype.removeListener = function removeListener(event, fn, context, once) {
+  var evt = prefix ? prefix + event : event;
 
-    if (!fn) {
-      this.clearEvent(evt);
-      return this;
-    }
-
-    var listeners = __classPrivateFieldGet(this, _EventEmitter_events, "f")[evt];
-
-    if (listeners.fn) {
-      if (listeners.fn === fn && (!once || listeners.once) && (!context || listeners.context === context)) {
-        this.clearEvent(evt);
-      }
-    } else {
-      var events = [];
-      var length = listeners.length;
-
-      for (var i = 0; i < length; i++) {
-        if (listeners[i].fn !== fn || once && !listeners[i].once || context && listeners[i].context !== context) {
-          events.push(listeners[i]);
-        }
-      }
-
-      if (events.length) {
-        __classPrivateFieldGet(this, _EventEmitter_events, "f")[evt] = events.length === 1 ? events[0] : events;
-      } else {
-        this.clearEvent(evt);
-      }
-    }
-
+  if (!this._events[evt]) return this;
+  if (!fn) {
+    clearEvent(this, evt);
     return this;
-  };
+  }
 
-  EventEmitter.prototype.removeAllListeners = function (event) {
-    var evt;
+  var listeners = this._events[evt];
 
-    if (event) {
-      evt = prefix ? prefix + event : event;
-      if (__classPrivateFieldGet(this, _EventEmitter_events, "f")[evt]) this.clearEvent(evt);
-    } else {
-      __classPrivateFieldSet(this, _EventEmitter_events, new Events(), "f");
-
-      __classPrivateFieldSet(this, _EventEmitter_eventsCount, 0, "f");
+  if (listeners.fn) {
+    if (
+      listeners.fn === fn &&
+      (!once || listeners.once) &&
+      (!context || listeners.context === context)
+    ) {
+      clearEvent(this, evt);
+    }
+  } else {
+    for (var i = 0, events = [], length = listeners.length; i < length; i++) {
+      if (
+        listeners[i].fn !== fn ||
+        (once && !listeners[i].once) ||
+        (context && listeners[i].context !== context)
+      ) {
+        events.push(listeners[i]);
+      }
     }
 
-    return this;
-  };
+    //
+    // Reset the array, or remove it completely if we have no more listeners.
+    //
+    if (events.length) this._events[evt] = events.length === 1 ? events[0] : events;
+    else clearEvent(this, evt);
+  }
 
-  return EventEmitter;
-}();
+  return this;
+};
 
-exports.default = EventEmitter;
-_EventEmitter_events = new WeakMap(), _EventEmitter_eventsCount = new WeakMap();
+/**
+ * Remove all listeners, or those of the specified event.
+ *
+ * @param {(String|Symbol)} [event] The event name.
+ * @returns {EventEmitter} `this`.
+ * @public
+ */
+EventEmitter.prototype.removeAllListeners = function removeAllListeners(event) {
+  var evt;
+
+  if (event) {
+    evt = prefix ? prefix + event : event;
+    if (this._events[evt]) clearEvent(this, evt);
+  } else {
+    this._events = new Events();
+    this._eventsCount = 0;
+  }
+
+  return this;
+};
+
+//
+// Alias methods names because people roll like that.
+//
+EventEmitter.prototype.off = EventEmitter.prototype.removeListener;
+EventEmitter.prototype.addListener = EventEmitter.prototype.on;
+
+//
+// Expose the prefix.
+//
+EventEmitter.prefixed = prefix;
+
+//
+// Allow `EventEmitter` to be imported as module namespace.
+//
+EventEmitter.EventEmitter = EventEmitter;
+
+//
+// Expose the module.
+//
+if ('undefined' !== typeof module) {
+  module.exports = EventEmitter;
+}
+
 },{}],"../src/loaders/AbstractLoader.ts":[function(require,module,exports) {
 "use strict";
 
@@ -429,7 +496,7 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
-var EventEmitter_1 = __importDefault(require("../events/EventEmitter"));
+var eventemitter3_1 = __importDefault(require("eventemitter3"));
 
 var AbstractLoader =
 /** @class */
@@ -441,10 +508,10 @@ function (_super) {
   }
 
   return AbstractLoader;
-}(EventEmitter_1.default);
+}(eventemitter3_1.default);
 
 exports.default = AbstractLoader;
-},{"../events/EventEmitter":"../src/events/EventEmitter.ts"}],"../src/LoadQueue.ts":[function(require,module,exports) {
+},{"eventemitter3":"../node_modules/eventemitter3/index.js"}],"../src/LoadQueue.ts":[function(require,module,exports) {
 "use strict";
 
 var __extends = this && this.__extends || function () {
@@ -526,28 +593,19 @@ exports.version = '1.0.0';
 },{"./LoadQueue":"../src/LoadQueue.ts"}],"index.ts":[function(require,module,exports) {
 "use strict";
 
-var __importDefault = this && this.__importDefault || function (mod) {
-  return mod && mod.__esModule ? mod : {
-    "default": mod
-  };
-};
-
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
 var src_1 = require("../src");
 
-var EventEmitter_1 = __importDefault(require("../src/events/EventEmitter"));
-
 var loadQueue = new src_1.LoadQueue();
 console.log('loadQueue', loadQueue);
-var eventEmitter = new EventEmitter_1.default();
-eventEmitter.once('ready', function () {
+loadQueue.once('ready', function () {
   return console.log('ready');
 });
-eventEmitter.emit('ready');
-},{"../src":"../src/index.ts","../src/events/EventEmitter":"../src/events/EventEmitter.ts"}],"../node_modules/parcel-bundler/src/builtins/hmr-runtime.js":[function(require,module,exports) {
+loadQueue.emit('ready');
+},{"../src":"../src/index.ts"}],"../node_modules/parcel-bundler/src/builtins/hmr-runtime.js":[function(require,module,exports) {
 var global = arguments[3];
 var OVERLAY_ID = '__parcel__error__overlay__';
 var OldModule = module.bundle.Module;
@@ -575,7 +633,7 @@ var parent = module.bundle.parent;
 if ((!parent || !parent.isParcelRequire) && typeof WebSocket !== 'undefined') {
   var hostname = "" || location.hostname;
   var protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-  var ws = new WebSocket(protocol + '://' + hostname + ':' + "56087" + '/');
+  var ws = new WebSocket(protocol + '://' + hostname + ':' + "58316" + '/');
 
   ws.onmessage = function (event) {
     checkedAssets = {};

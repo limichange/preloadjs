@@ -1,4 +1,4 @@
-import EventEmitter from '../events/EventEmitter'
+import EventEmitter from 'eventemitter3'
 
 export default class AbstractLoader extends EventEmitter {
   constructor() {
